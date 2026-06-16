@@ -63,9 +63,9 @@ public class PedidoService
 
             if(cupon == null)
                 throw new InvalidOperationException("Cupón no válido."); //TICK-203 - DANIEL PEÑA
-
+            
             // Validar vigencia del cupón
-            if (cupon.FechaExpiracionUtc >= DateTime.Now && cupon.Activo)
+            if (cupon.FechaExpiracionUtc >= DateTime.UtcNow && cupon.Activo) //TICK-202 - DANIEL PEÑA
             {
                 descuento = subtotal * (cupon.PorcentajeDescuento / 100m);
             }
