@@ -42,6 +42,9 @@ public class PedidoService
             if (producto == null)
                 throw new InvalidOperationException($"Producto {l.ProductoId} no existe.");
 
+            if (producto.Stock < l.Cantidad)
+                throw new InvalidOperationException($"Producto {producto.Nombre} no tiene stock suficiente."); //TICK-201 - DANIEL PEÑA
+
             var linea = new LineaPedido
             {
                 ProductoId = producto.Id,
