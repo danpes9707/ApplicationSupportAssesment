@@ -1,23 +1,27 @@
-using System.Linq;
 using MercadoVerde.Application.Abstractions;
 using MercadoVerde.Application.Dtos;
 using MercadoVerde.Domain;
+using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace MercadoVerde.Application.Services;
 
 public class PedidoService
 {
     private const decimal TasaImpuesto = 0.13m; // IVA 13%
+    private const decimal MaximoDescuentoCupon = 15.00m;
 
     private readonly ITiendaDbContext _db;
     private readonly InventarioService _inventario;
     private readonly IPasarelaPagoService _pasarela;
+    private readonly ILogger<PedidoService> _logger;
 
-    public PedidoService(ITiendaDbContext db, InventarioService inventario, IPasarelaPagoService pasarela)
+    public PedidoService(ITiendaDbContext db, InventarioService inventario, IPasarelaPagoService pasarela, ILogger<PedidoService> logger)
     {
         _db = db;
         _inventario = inventario;
         _pasarela = pasarela;
+        _logger = logger;
     }
 
     public Pedido CrearPedido(CrearPedidoDto dto)
@@ -67,7 +71,18 @@ public class PedidoService
             // Validar vigencia del cupón
             if (cupon.FechaExpiracionUtc >= DateTime.UtcNow && cupon.Activo) //TICK-202 - DANIEL PEÑA
             {
-                descuento = subtotal * (cupon.PorcentajeDescuento / 100m);
+                // { APLICACIÓN NUEVA REGLA DE NEGOCIO
+                decimal descuentoCalculado = subtotal * (cupon.PorcentajeDescuento / 100m);
+                if (descuentoCalculado > MaximoDescuentoCupon)
+                {
+                    descuento = MaximoDescuentoCupon;
+                    _logger.LogWarning("El Cupón {CodigoCupon} superó el monto máximo de descuento en el pedido del Cliente {ClienteId}. El Descuento calculado es: {DescuentoCalculado:C} y el Descuento aplicado fue: {MaximoDescuento:C}.", cupon.Codigo, dto.ClienteId, descuentoCalculado, MaximoDescuentoCupon);
+                }
+                else
+                {
+                    descuento = descuentoCalculado;
+                }
+                // } - DANIEL PEÑA
             }
         }
 
