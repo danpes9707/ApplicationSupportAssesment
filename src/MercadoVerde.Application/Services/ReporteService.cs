@@ -1,5 +1,6 @@
-using System.Linq;
 using MercadoVerde.Application.Abstractions;
+using Microsoft.EntityFrameworkCore;
+using System.Linq;
 
 namespace MercadoVerde.Application.Services;
 
@@ -24,27 +25,21 @@ public class ReporteService
     // En producción la tabla Pedidos tiene cientos de miles de filas.
     public List<FilaReporte> GenerarReporteVentas(DateTime desdeUtc, DateTime hastaUtc)
     {
-        var pedidos = _db.Pedidos
-            .Where(p => p.FechaUtc >= desdeUtc && p.FechaUtc <= hastaUtc)
-            .ToList();
-
-        var filas = new List<FilaReporte>();
-        foreach (var pedido in pedidos)
+        return _db.Pedidos //TICK-204 - DANIEL PEÑA
+        .AsNoTracking()
+        .Where(p => p.FechaUtc >= desdeUtc && p.FechaUtc <= hastaUtc)
+        .Select(pedido => new FilaReporte
         {
-            // Por cada pedido se vuelve a la base de datos a traer sus líneas
-            // y el nombre del cliente.
-            var lineas = _db.LineasPedido.Where(l => l.PedidoId == pedido.Id).ToList();
-            var cliente = _db.Clientes.FirstOrDefault(c => c.Id == pedido.ClienteId);
-
-            filas.Add(new FilaReporte
-            {
-                PedidoId = pedido.Id,
-                Cliente = cliente?.Nombre ?? "(desconocido)",
-                CantidadArticulos = lineas.Sum(l => l.Cantidad),
-                Total = pedido.Total
-            });
-        }
-
-        return filas;
+            PedidoId = pedido.Id,
+            Cliente = _db.Clientes
+                .Where(c => c.Id == pedido.ClienteId)
+                .Select(c => c.Nombre)
+                .FirstOrDefault() ?? "(desconocido)",
+            CantidadArticulos = _db.LineasPedido
+                .Where(l => l.PedidoId == pedido.Id)
+                .Sum(l => l.Cantidad),
+            Total = pedido.Total
+        })
+        .ToList();
     }
 }
