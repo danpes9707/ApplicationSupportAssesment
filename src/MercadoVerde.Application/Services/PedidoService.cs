@@ -72,7 +72,7 @@ public class PedidoService
         }
 
         // 3) Calcular impuesto y total
-        decimal impuesto = subtotal * TasaImpuesto;
+        decimal impuesto = (subtotal - descuento)* TasaImpuesto; //CORRECCIÓN 2 - DANIEL PEÑA
         decimal total = subtotal - descuento + impuesto;
 
         pedido.Subtotal = subtotal;
@@ -93,6 +93,7 @@ public class PedidoService
         {
             // El cobro falló por indisponibilidad del proveedor.
             pedido.Estado = EstadoPedido.Pendiente; //TICK-205 - DANIEL PEÑA
+            throw new InvalidOperationException("Error al procesar el pago. Intente nuevamente más tarde."); 
         }
 
         // 5) Descontar inventario
@@ -113,6 +114,6 @@ public class PedidoService
     public string GenerarLineaComprobante(Pedido pedido)
     {
         var cliente = _db.Clientes.FirstOrDefault(c => c.Id == pedido.ClienteId);
-        return $"Comprobante para {cliente.Email.ToUpper()} - Total: {pedido.Total:C}";
+        return $"Comprobante para {cliente.Email?.ToUpper() ?? "SIN CORREO ELECTRÓNICO"} - Total: {pedido.Total:C}"; //CORRECCIÓN 1 - DANIEL PEÑA
     }
 }
