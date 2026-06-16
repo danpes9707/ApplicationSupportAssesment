@@ -126,7 +126,7 @@
 					<paso 4> DEBE OBTENERSE EL MISMO RESULTADO REPORTADO, EN ESTE CASO PEDIDO CON ESTADO PAGADO PERO SIN REFERENCIA DE PASARELA DE PAGO.
 					
 ## Parte 3 (y 6) — Correcciones
-### TICK-201 — <PRODUCTO CON STOCK -1> · commit `<hash>`
+### TICK-201 — <PRODUCTO CON STOCK -1> · commit `<8ebe94008f6959cb42331e0e649aae0f8797f585>`
 - **Síntoma:** SE ESTAN VENDIENDO PRODUCTOS QUE YA NO SE ENCUENTRAN DISPONIBLES EN STOCK DE INVENTARIOS.
 - **Causa raíz:** `<PedidoService:41>` — var producto = _db.Productos.FirstOrDefault(p => p.Id == l.ProductoId);
 - **Corrección:** *ANTES: 
@@ -153,7 +153,7 @@
 								throw new InvalidOperationException($"Producto {l.ProductoId} no existe.");
 						
 							if(producto.Stock < l.Cantidad)
-								throw new InvalidOperationException($"Producto {producto.Nombre} no tiene stock suficiente.");
+								throw new InvalidOperationException($"Producto {producto.Nombre} no tiene stock suficiente."); //TICK-201 - DANIEL PEÑA
 						
 							var linea = new LineaPedido
 							{
@@ -167,6 +167,122 @@
 				  *¿Por qué es correcta?
 						PORQUE AHORA ANTES DE QUE PUEDA PROCESAR EL PEDIDO Y HACER EL PAGO CON LA PASARELA, EVALUA PRIMERO SI LOS PRODUCTOS EXISTEN Y LUEGO EVALUA SI LA CANTIDAD QUE SE HA COLOCADO COMO PARAMETRO SUPERA LA CANTIDAD DISPONIBLE EN STOCK, SI ES ESTE EL CASO DEVUELVE ERROR PARA QUE NO SE EJECUTE EL PAGO.
 - **Regresiones / efectos colaterales:** N/A
+
+### TICK-203 — <PEDIDOS CON ERROR 500 AL COLOCAR CUPON PROMO50> · commit `<5538472b1017fc034a3d40b6986cd5757127726e>`
+- **Síntoma:** AL REALIZAR UN PEDIDO CON EL CUPÓN PROMO50 DEVUELVE ERROR 500.
+- **Causa raíz:** `<PedidoService:62>` — var cupon = _db.Cupones.FirstOrDefault(c => c.Codigo == dto.CodigoCupon);
+- **Corrección:** *ANTES: 
+						if (!string.IsNullOrWhiteSpace(dto.CodigoCupon))
+						{
+							var cupon = _db.Cupones.FirstOrDefault(c => c.Codigo == dto.CodigoCupon);
+						
+							// Validar vigencia del cupón
+							if (cupon.FechaExpiracionUtc >= DateTime.Now && cupon.Activo)
+							{
+								descuento = subtotal * (cupon.PorcentajeDescuento / 100m);
+							}
+						}
+				  *DESPUES: 
+						if (!string.IsNullOrWhiteSpace(dto.CodigoCupon))
+						{
+							var cupon = _db.Cupones.FirstOrDefault(c => c.Codigo == dto.CodigoCupon);
+						
+							if(cupon == null)
+								throw new InvalidOperationException("Cupón no válido."); //TICK-203 - DANIEL PEÑA
+						
+							// Validar vigencia del cupón
+							if (cupon.FechaExpiracionUtc >= DateTime.Now && cupon.Activo)
+							{
+								descuento = subtotal * (cupon.PorcentajeDescuento / 100m);
+							}
+						}
+				  *¿Por qué es correcta?
+						PORQUE AHORA EVALUA SI EL CUPON EXISTE O NO ESTA REGISTRADO EN LA BD, EN CASO QUE NO EXISTA DEVOLVERA UN MENSAJE DE ERROR. ADEMAS LA EVAUACIÓN LA REALIZA ANTES DE QUE PUEDA EVALUAR LA VIGENCIA, EVITANDO ASI EL ERROR 500 REPORTADO.
+- **Regresiones / efectos colaterales:** N/A
+
+### TICK-204 — <PROBLEMA DE GENERACIÓN DE REPORTE DE VENTAS> · commit `<b902088ec515a1b308a8f19e2d157dda1c877369>`
+- **Síntoma:** AL GENERAR EL REPORTE DE VENTAS TARDA DEMASIADO TIEMPO O MUESTRA TIMEOUT.
+- **Causa raíz:** `<ReporteService:36>` — var lineas = _db.LineasPedido.Where(l => l.PedidoId == pedido.Id).ToList();
+- **Corrección:** *ANTES: 
+						var pedidos = _db.Pedidos
+						.Where(p => p.FechaUtc >= desdeUtc && p.FechaUtc <= hastaUtc)
+						.ToList();
+						var filas = new List<FilaReporte>();
+						foreach (var pedido in pedidos)
+						{
+							// Por cada pedido se vuelve a la base de datos a traer sus líneas
+							// y el nombre del cliente.
+							var lineas = _db.LineasPedido.Where(l => l.PedidoId == pedido.Id).ToList();
+							var cliente = _db.Clientes.FirstOrDefault(c => c.Id == pedido.ClienteId);
+						
+							filas.Add(new FilaReporte
+							{
+								PedidoId = pedido.Id,
+								Cliente = cliente?.Nombre ?? "(desconocido)",
+								CantidadArticulos = lineas.Sum(l => l.Cantidad),
+								Total = pedido.Total
+							});
+						}
+						return filas;
+				  *DESPUES: 
+						return _db.Pedidos //TICK-204 - DANIEL PEÑA
+						.AsNoTracking()
+						.Where(p => p.FechaUtc >= desdeUtc && p.FechaUtc <= hastaUtc)
+						.Select(pedido => new FilaReporte
+						{
+							PedidoId = pedido.Id,
+							// 2. EF Core traduce esto automáticamente en un LEFT JOIN en SQL
+							Cliente = _db.Clientes
+								.Where(c => c.Id == pedido.ClienteId)
+								.Select(c => c.Nombre)
+								.FirstOrDefault() ?? "(desconocido)",
+							
+							// 3. La suma se calcula directamente en la base de datos (SUM en SQL)
+							CantidadArticulos = _db.LineasPedido
+								.Where(l => l.PedidoId == pedido.Id)
+								.Sum(l => l.Cantidad),
+								
+							Total = pedido.Total
+						})
+						.ToList();
+				  *¿Por qué es correcta?
+						PORQUE AHORA EL METODO ESTA OPTIMIZADO Y SOLO HACE UN LLAMADO A LA BD, LO CUAL EVITARA QUE SE DE UN TIMEOUT.
+- **Regresiones / efectos colaterales:** N/A
+
+### TICK-205 — <PEDIDO MARCADO COMO PAGADO PERO SIN REFERENCIA DE LA PASARELA> · commit `<>`
+- **Síntoma:** CUANDO LA PASARELA DE PAGO FALLA AL PROCESAR EL PAGO DE UN PEDIDO, ESTE QUEDA EN ESTADO PAGADO PERO SIN REFERENCIA DE LA PASARELA DE PAGO.
+- **Causa raíz:** `<PedidoService:95>` — pedido.Estado = EstadoPedido.Pagado;
+- **Corrección:** *ANTES: 
+						try
+						{
+							var resultado = _pasarela.Cobrar(total, $"Pedido cliente {cliente.Nombre}");
+							if (resultado.Aprobado)
+								pedido.Estado = EstadoPedido.Pagado;
+							else
+								pedido.Estado = EstadoPedido.Rechazado;
+						}
+						catch
+						{
+							// El cobro falló por indisponibilidad del proveedor.
+							pedido.Estado = EstadoPedido.Pagado;
+						}
+				  *DESPUES: 
+						try
+						{
+							var resultado = _pasarela.Cobrar(total, $"Pedido cliente {cliente.Nombre}");
+							if (resultado.Aprobado)
+								pedido.Estado = EstadoPedido.Pagado;
+							else
+								pedido.Estado = EstadoPedido.Rechazado;
+						}
+						catch
+						{
+							// El cobro falló por indisponibilidad del proveedor.
+							pedido.Estado = EstadoPedido.Pendiente; //TICK-205 - DANIEL PEÑA
+						}
+				  *¿Por qué es correcta?
+						PORQUE AHORA CUANDO LA PASARELA DE PAGO FALLE POR INDISPONIBILIDAD DEL PROVEEDOR, EL ESTADO DEL PEDIDO YA NO QUEDARA COMO PAGADO SINO COMO PENDIENTE, ESTO LE AYUDARA A FINANZAS A IDENTIFICAR ESTOS PEDIDOS Y REPROCESARLOS.
+- **Regresiones / efectos colaterales:** FINANZAS DEBE TENER UN PROCESO O METODO REPROCESAR LOS PEDIDOS QUE QUEDEN EN ESTADO PENDIENTE Y SE PUEDA HACER EFECTIVO EL PAGO.
 
 ## Parte 4 — Tope de descuento
 - Dónde lo puse y por qué: ...

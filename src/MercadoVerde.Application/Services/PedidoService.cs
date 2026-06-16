@@ -92,7 +92,7 @@ public class PedidoService
         catch
         {
             // El cobro falló por indisponibilidad del proveedor.
-            pedido.Estado = EstadoPedido.Pagado;
+            pedido.Estado = EstadoPedido.Pendiente; //TICK-205 - DANIEL PEÑA
         }
 
         // 5) Descontar inventario
